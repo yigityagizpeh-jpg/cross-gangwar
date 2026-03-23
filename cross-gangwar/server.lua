@@ -4,6 +4,7 @@ local createdStashes, beingLooted = {}, {}
 local lobbyStage = {}
 local activeLobbies = {}
 local lootItemSet = {}
+local finishingPlayers = {}
 
 local function BuildLootItemSet()
     lootItemSet = {}
@@ -85,6 +86,10 @@ RegisterNetEvent('gs-survival:server:startSurvival', function(invited, stageId)
             local cid = Player.PlayerData.citizenid
 
             -- [ENVANTER YEDEKLEME]
+            -- In_survival flag'ini en başta kaydet: crash olsa bile DB'de kalır
+            Player.Functions.SetMetaData("in_survival", true)
+            Player.Functions.Save()
+
             local stashId = 'surv_backup_' .. cid
             exports.ox_inventory:RegisterStash(stashId, "Survival Yedek", 50, 100000)
             exports.ox_inventory:ClearInventory(stashId)
@@ -375,8 +380,13 @@ end)
 -- [Bitiş ve Geri Yükleme]
 RegisterNetEvent('gs-survival:server:finishSurvival', function(isVictory)
     local src = source
+    -- Aynı oyuncu için çift tetiklenmeyi önle
+    if finishingPlayers[src] then return end
+    finishingPlayers[src] = true
+    Citizen.SetTimeout(5000, function() finishingPlayers[src] = nil end)
+
     local Player = QBCore.Functions.GetPlayer(src)
-    if not Player then return end 
+    if not Player then finishingPlayers[src] = nil return end 
 
     local bucketId = GetPlayerRoutingBucket(src)
     local isActuallyDead = false
@@ -391,6 +401,10 @@ RegisterNetEvent('gs-survival:server:finishSurvival', function(isVictory)
         local TPlayer = QBCore.Functions.GetPlayer(targetId)
         if not TPlayer then return end
         local cid = TPlayer.PlayerData.citizenid
+
+        -- In_survival flag'ini hemen temizle
+        TPlayer.Functions.SetMetaData("in_survival", false)
+        TPlayer.Functions.Save()
 
         TriggerClientEvent('gs-survival:client:cleanupBeforeLeave', targetId) 
         TriggerClientEvent('ox_inventory:disarm', targetId) 
@@ -416,8 +430,9 @@ RegisterNetEvent('gs-survival:server:finishSurvival', function(isVictory)
                 exports.ox_inventory:AddItem(targetId, item.name, item.count, item.metadata)
             end
             playerBackups[cid] = nil 
-            exports.ox_inventory:ClearInventory('surv_backup_' .. cid)
         end
+        -- Stash'i her zaman temizle (playerBackups olsun ya da olmasın)
+        exports.ox_inventory:ClearInventory('surv_backup_' .. cid)
 
         if #itemsToKeep > 0 then
             for _, loot in pairs(itemsToKeep) do
@@ -556,11 +571,22 @@ QBCore.Functions.CreateCallback('gs-survival:server:checkReconnectBackup', funct
     local cid = Player.PlayerData.citizenid
     local stashId = 'surv_backup_' .. cid
     
-    -- Önce Stash'i (Veritabanını) kontrol et
+    -- Stash'i kayıt et ve mevcut içeriğini kontrol et
     exports.ox_inventory:RegisterStash(stashId, "Survival Yedek", 50, 100000)
     local items = exports.ox_inventory:GetInventoryItems(stashId)
     
-    -- Eğer veritabanında veya RAM'de yedek varsa
+    -- in_survival flag'i false/nil ise bu oyuncu gerçekten survival'da değildi
+    local inSurvival = Player.PlayerData.metadata["in_survival"]
+    if not inSurvival then
+        -- Stash'te arta kalan eşya varsa sessizce temizle, bildirim gösterme
+        if items and next(items) then
+            exports.ox_inventory:ClearInventory(stashId)
+        end
+        if playerBackups[cid] then playerBackups[cid] = nil end
+        return cb(false)
+    end
+
+    -- Oyuncu gerçekten survival'daydı (in_survival = true): yedekten geri yükle
     if (items and next(items)) or (playerBackups[cid] and #playerBackups[cid] > 0) then
         -- KRİTİK: Önce survival'dan kalan silahları/mermileri temizle
         exports.ox_inventory:ClearInventory(src)
@@ -571,7 +597,6 @@ QBCore.Functions.CreateCallback('gs-survival:server:checkReconnectBackup', funct
             for _, item in pairs(items) do
                 exports.ox_inventory:AddItem(src, item.name, item.count, item.metadata)
             end
-            exports.ox_inventory:ClearInventory(stashId) -- İade edildi, temizle
         -- Eğer RAM'de varsa oradan ver (Normal reconnect durumu)
         elseif playerBackups[cid] then
             for _, item in pairs(playerBackups[cid]) do
@@ -579,9 +604,19 @@ QBCore.Functions.CreateCallback('gs-survival:server:checkReconnectBackup', funct
             end
         end
 
-        playerBackups[cid] = nil -- Her iki durumda da yedeği temizle
+        -- Her iki durumda da RAM ve stash'i temizle
+        playerBackups[cid] = nil
+        exports.ox_inventory:ClearInventory(stashId)
+
+        -- in_survival flag'ini de sıfırla
+        Player.Functions.SetMetaData("in_survival", false)
+        Player.Functions.Save()
+
         cb(true)
     else
+        -- Flag true ama ne stash'te ne RAM'de eşya var: güvenlik olarak flag'i sıfırla
+        Player.Functions.SetMetaData("in_survival", false)
+        Player.Functions.Save()
         cb(false)
     end
 end)
