@@ -144,24 +144,30 @@ end)
 
 Citizen.CreateThread(function()
     while true do
-        -- Trafik yoğunluğunu her karede sıfırla (Bu crash yapmaz)
-        SetVehicleDensityMultiplierThisFrame(0.0)
-        SetPedDensityMultiplierThisFrame(0.0)
-        SetRandomVehicleDensityMultiplierThisFrame(0.0)
-        SetParkedVehicleDensityMultiplierThisFrame(0.0)
-        SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
-        Citizen.Wait(0)
+        if isSurvivalActive then
+            -- Trafik yoğunluğunu her karede sıfırla (sadece survival sırasında)
+            SetVehicleDensityMultiplierThisFrame(0.0)
+            SetPedDensityMultiplierThisFrame(0.0)
+            SetRandomVehicleDensityMultiplierThisFrame(0.0)
+            SetParkedVehicleDensityMultiplierThisFrame(0.0)
+            SetScenarioPedDensityMultiplierThisFrame(0.0, 0.0)
+            Citizen.Wait(0)
+        else
+            Citizen.Wait(1000)
+        end
     end
 end)
 
 Citizen.CreateThread(function()
     while true do
-        -- Alan temizliğini SADECE 5 saniyede bir yap (Crash engelleyen kısım)
-        local ped = PlayerPedId()
-        if DoesEntityExist(ped) then
-            local coords = GetEntityCoords(ped)
-            ClearAreaOfVehicles(coords.x, coords.y, coords.z, 500.0, false, false, false, false, false)
-            ClearAreaOfPeds(coords.x, coords.y, coords.z, 500.0, 1)
+        if isSurvivalActive then
+            -- Alan temizliğini SADECE 5 saniyede bir yap (Crash engelleyen kısım)
+            local ped = PlayerPedId()
+            if DoesEntityExist(ped) then
+                local coords = GetEntityCoords(ped)
+                ClearAreaOfVehicles(coords.x, coords.y, coords.z, 500.0, false, false, false, false, false)
+                ClearAreaOfPeds(coords.x, coords.y, coords.z, 500.0, 1)
+            end
         end
         Citizen.Wait(5000) 
     end
